@@ -25,20 +25,24 @@ async function connectRabbitMQ() {
     await rabbitMQService.bindQueue('dlq', 'dlx', '#');
     
     logger.info('Configuration RabbitMQ terminée');
-    
+    return true;
   } catch (err) {
     // Le statut est déjà mis à jour dans le service RabbitMQ en cas d'erreur
     logger.error({ err }, 'Impossible de configurer RabbitMQ');
-    process.exit(1);
+    if (process.env.NODE_ENV === 'production') {
+      // En production, on ne quitte pas le processus immédiatement
+      // pour permettre aux health checks de fonctionner
+      logger.warn('Mode production: service démarré sans RabbitMQ, tentatives de reconnexion en cours');
+      return false;
+    } else {
+      process.exit(1);
+    }
   }
 }
 
 // Démarrage du serveur
 async function startServer() {
   try {
-    // Connexion à RabbitMQ
-    await connectRabbitMQ();
-    
     // Démarrage du serveur HTTP
     serve({
       fetch: api.fetch,
@@ -46,6 +50,9 @@ async function startServer() {
     });
     
     logger.info(`Serveur démarré sur le port ${env.port}`);
+    
+    // Connexion à RabbitMQ (sans bloquer le démarrage du serveur)
+    connectRabbitMQ();
   } catch (err) {
     logger.error({ err }, 'Erreur au démarrage du serveur');
     process.exit(1);

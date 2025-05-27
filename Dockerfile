@@ -10,6 +10,9 @@ RUN npm run build
 
 FROM node:18-alpine
 
+# Créer un utilisateur non-root
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
 WORKDIR /app
 
 COPY --from=build /app/package*.json ./
@@ -21,6 +24,10 @@ RUN npm ci --only=production
 # Les valeurs réelles devraient être fournies via le fichier .env ou des variables d'environnement
 ENV PORT=3000
 ENV LOG_LEVEL=info
+ENV NODE_ENV=production
+
+# Définir l'utilisateur non-root
+USER appuser
 
 EXPOSE 3000
 

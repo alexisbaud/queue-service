@@ -15,7 +15,11 @@ Service de gestion de files d'attente basé sur RabbitMQ, conçu pour améliorer
 - [Modèles d'utilisation](#modèles-dutilisation)
 - [Surveillance et métriques](#surveillance-et-métriques)
 - [Sécurité](#sécurité)
-- [Déploiement](#déploiement)
+- [Optimisation des performances](#optimisation-des-performances)
+- [Stratégies de déploiement](#stratégies-de-déploiement)
+- [Exemples d'intégration](#exemples-dintégration)
+- [Maintenance](#maintenance)
+- [Dépannage](#dépannage)
 - [Contribution](#contribution)
 - [Licence](#licence)
 - [Test du service](#test-du-service)
@@ -154,6 +158,10 @@ La configuration se fait principalement via variables d'environnement:
 | `MAX_RETRIES` | Nombre max. de tentatives | 5 |
 | `INITIAL_RETRY_DELAY` | Délai initial entre tentatives (ms) | 1000 |
 | `MAX_RETRY_DELAY` | Délai max entre tentatives (ms) | 60000 |
+| `TLS_ENABLED` | Activer TLS | false |
+| `TLS_CA_PATH` | Chemin vers le certificat CA | - |
+| `TLS_CERT_PATH` | Chemin vers le certificat client | - |
+| `TLS_KEY_PATH` | Chemin vers la clé client | - |
 
 Pour le développement local, créez un fichier `.env` à la racine du projet.
 
@@ -280,6 +288,28 @@ queueService.bindQueue('push_notifications', 'notifications', '');
 queueService.consume('push_notifications', handlePushNotification);
 ```
 
+### Routage par sujet (Topic)
+
+Pour cibler des consommateurs selon un pattern précis:
+
+```javascript
+// Création d'un exchange de type topic
+await queueService.createExchange('logs', 'topic', { durable: true });
+
+// Publication avec routing key spécifique
+await queueService.publish({
+  exchange: 'logs',
+  routingKey: 'system.error',
+  message: { source: 'auth', message: 'Failed login attempt' }
+});
+
+// Consommateur abonné à tous les erreurs
+queueService.bindQueue('error_logs', 'logs', '*.error');
+
+// Consommateur abonné à tous les logs système
+queueService.bindQueue('system_logs', 'logs', 'system.*');
+```
+
 ## Surveillance et métriques
 
 Le service expose les métriques suivantes via Prometheus:
@@ -296,24 +326,234 @@ Accès aux dashboards:
 
 ## Sécurité
 
-- Communication TLS entre les composants
-- Authentification par certificats clients
-- Isolation par vHosts RabbitMQ
-- Utilisateurs avec permissions limitées
+### Authentification et autorisation
 
-## Déploiement
+Le service supporte les méthodes d'authentification suivantes:
+- Authentification basique (utilisateur/mot de passe)
+- Authentification TLS par certificat client
+- Tokens JWT pour l'API REST (à configurer)
+
+### Chiffrement des communications
+
+Pour sécuriser les communications:
+1. Activez TLS en définissant `TLS_ENABLED=true` dans votre `.env`
+2. Fournissez les certificats appropriés via les variables `TLS_CA_PATH`, `TLS_CERT_PATH` et `TLS_KEY_PATH`
+3. Assurez-vous que RabbitMQ est configuré pour accepter les connexions TLS
+
+### Isolation des environnements
+
+Pour isoler les environnements dans RabbitMQ:
+1. Créez des vHosts distincts pour chaque environnement
+2. Utilisez des utilisateurs RabbitMQ dédiés avec des permissions limitées
+3. Spécifiez le vHost dans l'URL de connexion: `amqp://user:password@host:5672/vhost`
+
+## Optimisation des performances
+
+### Configuration recommandée
+
+Pour optimiser les performances:
+
+1. **Dimensionnement des files d'attente**:
+   - Utilisez `prefetch` pour limiter le nombre de messages traités simultanément
+   - Définissez des limites de taille pour les files (`x-max-length`)
+
+2. **Persistance sélective**:
+   - Activez `persistent: true` uniquement pour les messages critiques
+   - Utilisez `lazy queues` pour les files volumineuses
+
+3. **Configuration du circuit breaker**:
+   - Ajustez les seuils et délais dans `.env` selon votre charge
+
+4. **Scaling horizontal**:
+   - Déployez plusieurs instances du service API
+   - Mettez en place un load balancer pour distribuer le trafic
+
+## Stratégies de déploiement
 
 ### Railway
 
-1. Configurer les variables d'environnement dans Railway
-2. Connecter le dépôt GitHub
-3. Activer le déploiement automatique
+1. Assurez-vous que votre code est dans un dépôt Git
+2. Connectez-vous à [Railway](https://railway.app/)
+3. Créez un nouveau projet et sélectionnez "Deploy from GitHub repo"
+4. Choisissez votre dépôt Git contenant le queue-service
+5. Dans les paramètres du déploiement, sélectionnez:
+   - **Deploy using**: Dockerfile
+   - **Root Directory**: queue-service (si nécessaire)
+
+6. Configurez les variables d'environnement suivantes:
+   ```
+   RABBITMQ_URL=amqp://user:password@your-rabbitmq-service:5672
+   PORT=3000
+   LOG_LEVEL=info
+   NODE_ENV=production
+   ```
+
+7. Si vous avez besoin d'une instance RabbitMQ:
+   - Ajoutez un nouveau service RabbitMQ sur Railway
+   - Utilisez le service managé Railway ou déployez la configuration Docker incluse
+
+Le service sera automatiquement déployé et les health checks configurés dans `railway.toml` permettront à Railway de vérifier son bon fonctionnement.
+
+### Kubernetes
+
+Pour déployer sur Kubernetes:
+
+1. Utilisez les fichiers manifestes fournis dans `./kubernetes/`
+2. Ajustez les ressources selon vos besoins:
+
+```yaml
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "200m"
+```
+
+3. Déployez avec:
+```bash
+kubectl apply -f ./kubernetes/
+```
 
 ### Docker
 
 ```bash
 docker build -t queue-service .
 docker run -p 3000:3000 --env-file .env queue-service
+```
+
+## Exemples d'intégration
+
+### Intégration avec un service d'authentification
+
+```javascript
+// Service d'authentification
+app.post('/register', async (req, res) => {
+  try {
+    // Création de l'utilisateur
+    const user = await userService.create(req.body);
+    
+    // Envoyer un email de confirmation via le queue service
+    await axios.post('http://queue-service:3000/api/v1/publish', {
+      exchange: 'email',
+      routingKey: 'confirmation',
+      message: {
+        to: user.email,
+        subject: 'Confirmation d\'inscription',
+        template: 'confirmation',
+        variables: {
+          userName: user.name,
+          confirmationUrl: `https://example.com/confirm?token=${user.confirmationToken}`
+        }
+      }
+    });
+    
+    res.status(201).json({ 
+      userId: user.id, 
+      message: 'User created, confirmation email will be sent shortly' 
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+```
+
+### Intégration avec un service de traitement d'images
+
+```javascript
+// Service d'upload d'images
+app.post('/upload', upload.single('image'), async (req, res) => {
+  try {
+    // Enregistrer l'image originale
+    const imagePath = req.file.path;
+    const imageId = await imageStorage.save(imagePath);
+    
+    // Demander le traitement asynchrone de l'image
+    await axios.post('http://queue-service:3000/api/v1/publish', {
+      exchange: 'media',
+      routingKey: 'image.process',
+      message: {
+        imageId,
+        operations: ['resize', 'optimize', 'watermark'],
+        sizes: ['thumbnail', 'medium', 'large'],
+        userId: req.user.id
+      },
+      options: {
+        persistent: true,
+        priority: 2
+      }
+    });
+    
+    res.status(200).json({ 
+      imageId,
+      message: 'Image uploaded, processing started' 
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+```
+
+## Maintenance
+
+### Surveillance des files d'attente
+
+Pour identifier les problèmes potentiels:
+
+1. Vérifiez régulièrement les métriques RabbitMQ:
+   - Nombre de messages non acquittés
+   - Longueur des files d'attente
+   - Taux de rejet de messages
+
+2. Configurez des alertes pour les seuils critiques:
+   - File d'attente dépassant une certaine taille
+   - Dead Letter Queue recevant des messages
+   - Taux d'erreurs élevé
+
+### Sauvegarde et restauration
+
+1. Sauvegardez régulièrement la configuration RabbitMQ:
+   ```bash
+   rabbitmqctl export_definitions backup.json
+   ```
+
+2. Pour restaurer:
+   ```bash
+   rabbitmqctl import_definitions backup.json
+   ```
+
+## Dépannage
+
+### Problèmes courants
+
+| Problème | Cause possible | Solution |
+|----------|----------------|----------|
+| Messages non traités | Consumer arrêté ou déconnecté | Vérifier le statut des consommateurs |
+| Files qui grossissent | Traitement trop lent | Augmenter le nombre de workers |
+| Messages rejetés | Erreurs dans le handler | Vérifier les logs du consumer |
+| Connexion perdue | Problème réseau ou redémarrage RabbitMQ | Vérifier la connectivité, le service se reconnectera automatiquement |
+
+### Logs et diagnostics
+
+Pour accéder aux logs détaillés:
+
+```bash
+# Logs du service
+docker logs queue-service-api
+
+# Logs RabbitMQ
+docker logs queue-service-rabbitmq
+```
+
+Pour diagnostiquer RabbitMQ:
+
+```bash
+# Status général
+docker exec queue-service-rabbitmq rabbitmqctl status
+
+# Liste des queues et leur état
+docker exec queue-service-rabbitmq rabbitmqctl list_queues name messages consumers
 ```
 
 ## Contribution
@@ -341,7 +581,25 @@ Pour tester le service:
    - RabbitMQ Management: http://localhost:15672 (guest/guest)
    - API du service: http://localhost:3000
 
-3. **Publier des messages de test**:
+3. **Exécuter les tests automatisés**:
+   ```bash
+   # Exécuter tous les tests unitaires
+   npm test
+   
+   # Exécuter les tests avec couverture
+   npm run test:coverage
+   
+   # Exécuter un test spécifique
+   npm test -- test/services/statusService.test.ts
+   
+   # Exécuter les tests en mode watch (développement)
+   npm run test:watch
+   ```
+
+   Note: Certains tests peuvent nécessiter un environnement RabbitMQ en cours d'exécution.
+   Les tests d'intégration sont désactivés par défaut (avec `.skip`) et peuvent être activés si nécessaire.
+
+4. **Publier des messages de test**:
    ```bash
    # Utiliser le script de test
    ./test-publish.sh
@@ -351,7 +609,7 @@ Pour tester le service:
    - Lie la file à l'exchange par défaut
    - Publie 20 messages de test
 
-4. **Consommer les messages** (optionnel):
+5. **Consommer les messages** (optionnel):
    ```bash
    # Installer la dépendance si nécessaire
    npm install amqplib
