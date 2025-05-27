@@ -17,7 +17,8 @@ COPY --from=build /app/dist ./dist
 
 RUN npm ci --only=production
 
-# Configuration des variables d'environnement par défaut
+# Configuration minimale des variables d'environnement
+# Les valeurs réelles devraient être fournies via le fichier .env ou des variables d'environnement
 ENV PORT=3000
 ENV LOG_LEVEL=info
 

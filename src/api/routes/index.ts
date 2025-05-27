@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import { healthRoutes } from './health';
 import { queueRoutes } from './queue';
-import { metricsRoutes } from './metrics';
 
 const api = new Hono();
 
@@ -20,8 +19,7 @@ api.use('*', async (c, next) => {
 });
 
 // Groupes de routes
-api.route('/health', healthRoutes);
+api.route('/healthz', healthRoutes);
 api.route('/api/v1', queueRoutes);
-api.route('/metrics', metricsRoutes);
 
 export { api }; 

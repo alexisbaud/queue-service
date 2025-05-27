@@ -3,38 +3,31 @@ import { api } from './api/routes';
 import { env } from './config/env';
 import { logger } from './utils/logger';
 import { RabbitMQService } from './services/rabbitmq';
-import { setupMetrics } from './services/metrics';
+import { statusService, StatusTypes } from './services/statusService';
 
 // Instance du service RabbitMQ
 const rabbitMQService = new RabbitMQService();
-
-// Initialisation des métriques
-setupMetrics();
 
 // Connexion à RabbitMQ
 async function connectRabbitMQ() {
   try {
     await rabbitMQService.connect();
+    // Le statut RabbitMQ est déjà mis à jour dans le service RabbitMQ
     
-    // Configuration par défaut des exchanges
+    // Configuration par défaut des exchanges génériques
     await rabbitMQService.createExchange('default', 'direct', { durable: true });
-    await rabbitMQService.createExchange('email', 'direct', { durable: true });
-    await rabbitMQService.createExchange('notifications', 'fanout', { durable: true });
     await rabbitMQService.createExchange('dlx', 'direct', { durable: true });
     
-    // Queues par défaut
-    await rabbitMQService.createQueue('email_queue', {
-      durable: true,
-      deadLetterExchange: 'dlx'
-    });
+    // Queue pour les dead letters
     await rabbitMQService.createQueue('dlq', { durable: true });
     
-    // Bindings
-    await rabbitMQService.bindQueue('email_queue', 'email', 'confirmation');
+    // Binding pour les dead letters
     await rabbitMQService.bindQueue('dlq', 'dlx', '#');
     
     logger.info('Configuration RabbitMQ terminée');
+    
   } catch (err) {
+    // Le statut est déjà mis à jour dans le service RabbitMQ en cas d'erreur
     logger.error({ err }, 'Impossible de configurer RabbitMQ');
     process.exit(1);
   }

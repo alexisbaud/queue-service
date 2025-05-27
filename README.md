@@ -18,6 +18,7 @@ Service de gestion de files d'attente basé sur RabbitMQ, conçu pour améliorer
 - [Déploiement](#déploiement)
 - [Contribution](#contribution)
 - [Licence](#licence)
+- [Test du service](#test-du-service)
 
 ## Vue d'ensemble
 
@@ -39,7 +40,6 @@ Le service s'articule autour des composants suivants:
 - **API Gateway**: Point d'entrée REST pour les producteurs de messages
 - **Message Broker**: RabbitMQ pour le stockage et la distribution des messages
 - **Workers**: Traitement des messages depuis les files d'attente
-- **Monitoring**: Surveillance des métriques du système via Prometheus et Grafana
 
 ## Fonctionnalités
 
@@ -67,8 +67,6 @@ Le service s'articule autour des composants suivants:
 - **Hono**: Framework web léger et performant
 - **RabbitMQ**: Broker de messages
 - **Docker**: Conteneurisation
-- **Prometheus**: Collecte de métriques
-- **Grafana**: Visualisation des métriques
 - **TypeScript**: Typage statique
 
 ## Structure du projet
@@ -84,8 +82,6 @@ queue-service/
 │   ├── services/       # Logique métier
 │   └── utils/          # Utilitaires
 ├── docker/
-│   ├── grafana/        # Configuration Grafana
-│   ├── prometheus/     # Configuration Prometheus
 │   └── rabbitmq/       # Configuration RabbitMQ
 ├── test/               # Tests unitaires et d'intégration
 ├── docs/               # Documentation
@@ -102,7 +98,25 @@ queue-service/
 - Docker et Docker Compose
 - Node.js 18+
 
-### Installation
+### Installation avec script automatisé
+
+1. Exécutez le script de configuration
+   ```bash
+   ./scripts/setup.sh
+   ```
+   Ce script va:
+   - Vérifier les prérequis (Node.js, Docker, Docker Compose)
+   - Installer les dépendances
+   - Créer un fichier .env à partir de .env.example si nécessaire
+   - Démarrer les conteneurs Docker (RabbitMQ)
+   - Construire le projet
+
+2. Démarrer le service
+   ```bash
+   npm run dev
+   ```
+
+### Installation manuelle
 
 1. Cloner le dépôt
    ```bash
@@ -193,10 +207,35 @@ POST /api/v1/bindings
 }
 ```
 
-### Santé du service
+#### Vérification de l'état du service
 
 ```http
-GET /health
+GET /healthz
+```
+
+Réponse:
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2023-08-15T14:32:10.123Z",
+  "rabbitmq": "connected",
+  "version": "1.0.0"
+}
+```
+
+### Disponibilité du service
+
+```http
+GET /healthz/ready
+```
+
+Réponse:
+
+```json
+{
+  "status": "ready"
+}
 ```
 
 ## Modèles d'utilisation
@@ -245,14 +284,15 @@ queueService.consume('push_notifications', handlePushNotification);
 
 Le service expose les métriques suivantes via Prometheus:
 
-- `queue_length`: Nombre de messages dans chaque file
-- `message_processing_time`: Temps de traitement des messages
-- `message_error_rate`: Taux d'erreur par file/consommateur
-- `throughput`: Messages traités par seconde
+- `queue_message_published_total`: Nombre total de messages publiés
+- `queue_message_publish_errors_total`: Nombre total d'erreurs de publication
+- `queue_message_consumed_total`: Nombre total de messages consommés
+- `queue_message_consume_errors_total`: Nombre total d'erreurs de consommation
+- `queue_message_count`: Nombre de messages dans la file
+- `queue_message_processing_seconds`: Temps de traitement des messages
 
 Accès aux dashboards:
-- Grafana: http://localhost:3000 (admin/admin)
-- Prometheus: http://localhost:9090
+- RabbitMQ Management: http://localhost:15672 (guest/guest)
 
 ## Sécurité
 
@@ -286,4 +326,36 @@ docker run -p 3000:3000 --env-file .env queue-service
 
 ## Licence
 
-Distribué sous la licence MIT. Voir `LICENSE` pour plus d'informations. 
+Distribué sous la licence MIT. Voir `LICENSE` pour plus d'informations.
+
+## Test du service
+
+Pour tester le service:
+
+1. **Démarrer l'environnement**:
+   ```bash
+   docker-compose up -d
+   ```
+
+2. **Accéder aux interfaces**:
+   - RabbitMQ Management: http://localhost:15672 (guest/guest)
+   - API du service: http://localhost:3000
+
+3. **Publier des messages de test**:
+   ```bash
+   # Utiliser le script de test
+   ./test-publish.sh
+   ```
+   Ce script:
+   - Crée une file d'attente de test
+   - Lie la file à l'exchange par défaut
+   - Publie 20 messages de test
+
+4. **Consommer les messages** (optionnel):
+   ```bash
+   # Installer la dépendance si nécessaire
+   npm install amqplib
+   
+   # Démarrer le consumer
+   node test-consumer.js
+   ``` 
